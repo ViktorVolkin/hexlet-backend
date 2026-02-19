@@ -6,6 +6,8 @@ import { userRegistrationSchema } from "../schemas/registrationSchema"
 import { hashPass } from "../utils/hashPassword"
 import jwt from "jsonwebtoken"
 import bcrypt from "bcrypt"
+import { cookieVerification } from "../middleware/isLogined"
+import { AuthRequest } from "../types/AuthRequest.types"
 
 const router = Router()
 
@@ -55,23 +57,24 @@ router.post(
 				{ expiresIn: "30m" },
 			)
 
-			res.cookie("short-lived-token", shortLivedToken, {
+			res.cookie("short_lived_token", shortLivedToken, {
 				maxAge: 1800 * 1000,
 				httpOnly: true,
 			})
 
-			res.cookie("long-lived-token", longLivedToken, {
+			res.cookie("long_lived_token", longLivedToken, {
 				maxAge: 60 * 60 * 24 * 90 * 1000,
 				httpOnly: true,
+				path: '/api/auth/refresh'
 			})
-			prisma.HashedTokens.create({
+			await prisma.hashedTokens.create({
 				data: {
 					userId: newUser.id,
-					hashedToken: await hashPass(longLivedToken),
+					token: await hashPass(longLivedToken),
 				},
 			})
 
-			return res.status(400).json({
+			return res.status(201).json({
 				ok: true,
 				new_user_id: newUser.id,
 			})
@@ -99,7 +102,7 @@ router.post(
 			find_existing_user.password,
 		)
 		if (!isValidPassword) {
-			return res.status(401).json({ ok: false })
+			return res.status(401).json({ ok: false, })
 		}
 
 		const shortLivedToken = jwt.sign(
@@ -113,18 +116,83 @@ router.post(
 			process.env.REFRESH_SECRET!,
 			{ expiresIn: "90d" },
 		)
+		await prisma.hashedTokens.create({
+			data: {
+				userId: find_existing_user.id,
+				token: await hashPass(longLivedToken),
+			},
+		})
 
-		res.cookie("short-lived-token", shortLivedToken, {
+		res.cookie("short_lived_token", shortLivedToken, {
 			maxAge: 1800 * 1000,
 			httpOnly: true,
 		})
 
-		res.cookie("long-lived-token", longLivedToken, {
+		res.cookie("long_lived_token", longLivedToken, {
 			maxAge: 60 * 60 * 24 * 90 * 1000,
 			httpOnly: true,
-		})
+			path: '/api/auth/refresh'
+})
 	},
 )
+
+router.get('/me', cookieVerification, async (req: AuthRequest, res: Response) => {
+	if(!req.user_id){
+		return res.status(401).json({ok:false})
+	}
+    const user = await prisma.user.findUnique({
+        where: { id: req.user_id },
+    });
+	if(!user){
+		return res.status(404).json({ok:false})
+	}
+    return res.json({ ok: true });
+});
+
+router.post('/refresh',async (req:AuthRequest,res:Response)=>{
+
+    const refreshToken = req.cookies.long_lived_token;
+
+    if (!refreshToken) {
+        return res.status(401).json({ ok: false, message: "No refresh token" });
+	}
+ try {
+        const decoded = jwt.verify(refreshToken, process.env.REFRESH_SECRET!) as { userId: number };
+        const userTokens = await prisma.hashedTokens.findMany({
+            where: { userId: decoded.userId },
+        });
+		
+        let isTokenValid = false;
+        for (const record of userTokens) {
+            const match = await bcrypt.compare(refreshToken, record.token);
+            if (match) {
+                isTokenValid = true;
+                break;
+            }
+        }
+
+        if (!isTokenValid) {
+            return res.status(401).json({ ok: false, message: "Token not found in DB" });
+        }
+        const shortLivedToken = jwt.sign(
+            { userId: decoded.userId },
+            process.env.JWT_SECRET!,
+            { expiresIn: "30m" }
+        );
+
+        res.cookie("short_lived_token", shortLivedToken, {
+            maxAge: 1800 * 1000,
+            httpOnly: true,
+        });
+
+        return res.json({ ok: true });
+
+    } catch (e) {
+        return res.status(401).json({ ok: false, message: "Invalid refresh token" });
+    }
+});
+
+
 router.post("/logout", () => {})
 
 export default router
