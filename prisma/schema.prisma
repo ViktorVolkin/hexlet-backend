@@ -15,12 +15,21 @@ datasource db {
 
 model User {
   id Int @id @default(autoincrement())
-  username String @unique
+  username String
   email String @unique
   password  String
   createdAt DateTime @default(now())
   posts Post[]
+  hashedTokens HashedTokens[]
 }
+
+model HashedTokens {
+  id     Int    @id @default(autoincrement())
+  userId Int
+  user   User   @relation(fields: [userId], references: [id])
+  token  String @unique
+}
+
 
 model Post{
   id  Int @id @default(autoincrement())

@@ -37,7 +37,38 @@ router.post(
 			}
 			const hashedPass = await hashPass(password)
 			const newUser = await prisma.user.create({
-				data: { username, password: hashedPass, email },
+				data: {
+					username,
+					password: hashedPass,
+					email,
+				},
+			})
+			const longLivedToken = jwt.sign(
+				{ userId: email },
+				process.env.REFRESH_SECRET!,
+				{ expiresIn: "90d" },
+			)
+
+			const shortLivedToken = jwt.sign(
+				{ userId: newUser.id },
+				process.env.JWT_SECRET!,
+				{ expiresIn: "30m" },
+			)
+
+			res.cookie("short-lived-token", shortLivedToken, {
+				maxAge: 1800 * 1000,
+				httpOnly: true,
+			})
+
+			res.cookie("long-lived-token", longLivedToken, {
+				maxAge: 60 * 60 * 24 * 90 * 1000,
+				httpOnly: true,
+			})
+			prisma.HashedTokens.create({
+				data: {
+					userId: newUser.id,
+					hashedToken: await hashPass(longLivedToken),
+				},
 			})
 
 			return res.status(400).json({
