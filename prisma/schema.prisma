@@ -20,14 +20,20 @@ model User {
   password  String
   createdAt DateTime @default(now())
   posts Post[]
-  hashedTokens HashedTokens[]
+  Session Session[]
 }
 
-model HashedTokens {
-  id     Int    @id @default(autoincrement())
-  userId Int
-  user   User   @relation(fields: [userId], references: [id])
-  token  String @unique
+
+model Session {
+  id        String   @id @default(uuid()) 
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  userAgent String?
+  ip        String?
+
+  @@index([userId])
 }
 
 
